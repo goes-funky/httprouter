@@ -66,6 +66,15 @@ func (r *Router) Handler(method, path string, handler HandlerFunc, middleware ..
 	r.delegate.HandlerFunc(method, path, adaptHandler(r.logger, r.errorHandler, handler))
 }
 
+func (r *Router) RawHandler(method, path string, handler http.Handler, middleware ...Middleware) {
+	h := func(rw http.ResponseWriter, r *http.Request) error {
+		handler.ServeHTTP(rw, r)
+		return nil
+	}
+
+	r.Handler(method, path, h, middleware...)
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.delegate.ServeHTTP(w, req)
 }

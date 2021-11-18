@@ -12,7 +12,13 @@ type PanicHandler func(logger *zap.Logger, verbose bool) PanicHandlerFunc
 
 func WithVerbose(verbose bool) Opt {
 	return func(c *config) {
-		c.verbose = true
+		c.verbose = verbose
+	}
+}
+
+func WithLogHTTP(logHTTP bool) Opt {
+	return func(c *config) {
+		c.logHTTP = logHTTP
 	}
 }
 
@@ -42,6 +48,7 @@ func WithGlobalOptions(handler HandlerFunc) Opt {
 
 type config struct {
 	verbose       bool
+	logHTTP       bool
 	errorHandler  ErrorHandler
 	panicHandler  PanicHandler
 	middleware    []Middleware
@@ -49,6 +56,7 @@ type config struct {
 }
 
 var defaultConfig = config{
+	logHTTP:      true,
 	errorHandler: DefaultErrorHandler,
 	panicHandler: DefaultPanicHandler,
 }

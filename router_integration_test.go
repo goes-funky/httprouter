@@ -3,15 +3,13 @@
 package httprouter_test
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/goes-funky/httprouter"
-	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
+
+	"github.com/goes-funky/httprouter"
 )
 
 type Response struct {
@@ -51,6 +49,7 @@ func TestIntegration(t *testing.T) {
 		name             string
 		method, path     string
 		expectedStatus   int
+		expectedHeaders  http.Header
 		expectedResponse *httprouter.ErrorResponse
 	}{
 
@@ -69,39 +68,22 @@ func TestIntegration(t *testing.T) {
 			path:           "/",
 			expectedStatus: http.StatusMethodNotAllowed,
 		},
+		{
+			name:           "options handler",
+			method:         http.MethodOptions,
+			path:           "/",
+			expectedStatus: http.StatusOK,
+			expectedHeaders: http.Header{
+				"Allow": []string{"GET, OPTIONS"},
+			},
+		},
 	}
 
 	for _, test := range failTests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			httpResp := doRequest(t, test.method, test.path)
-
-			if test.expectedStatus != httpResp.StatusCode {
-				t.Fatalf("expected status code %d, got %d", test.expectedStatus, httpResp.StatusCode)
-			}
-
-			if test.expectedResponse == nil {
-				body, err := io.ReadAll(httpResp.Body)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if len(body) != 0 {
-					t.Error("expected no body")
-				}
-
-				return
-			}
-
-			var errorResp httprouter.ErrorResponse
-			if err := json.NewDecoder(httpResp.Body).Decode(&errorResp); err != nil {
-				t.Fatal(err)
-			}
-
-			if diff := cmp.Diff(test.expectedResponse, &errorResp); diff != "" {
-				t.Error("expected response", diff)
-			}
+			expectErrorResponse(t, httpResp, test.expectedStatus, test.expectedHeaders, test.expectedResponse)
 		})
 	}
-
 }

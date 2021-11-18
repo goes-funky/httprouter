@@ -1,0 +1,8 @@
+name: build
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+jobs:
+  build-go:
+    uses: goes-funky/workflows/.github/workflows/build-go.yaml@master

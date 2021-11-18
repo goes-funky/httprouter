@@ -9,13 +9,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/goes-funky/httprouter"
-	"github.com/goes-funky/zapdriver"
 	"github.com/google/go-cmp/cmp"
+	"go.uber.org/zap"
+
+	"github.com/goes-funky/httprouter"
 )
 
 func TestRouterDefaultHandlers(t *testing.T) {
-	logger, err := zapdriver.NewDevelopmentConfig().Build()
+	logger, err := zap.NewDevelopmentConfig().Build()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,18 +40,19 @@ func TestRouterDefaultHandlers(t *testing.T) {
 		panic("panic handler")
 	})
 
-	doRequest := func(method string, path string) *httptest.ResponseRecorder {
+	doRequest := func(method string, path string) *http.Response {
 		req := httptest.NewRequest(method, "http://example.com"+path, nil)
 		rw := httptest.NewRecorder()
 		router.ServeHTTP(rw, req)
 
-		return rw
+		return rw.Result()
 	}
 
 	tests := []struct {
 		name             string
 		method, path     string
 		expectedStatus   int
+		expectedHeaders  http.Header
 		expectedResponse *httprouter.ErrorResponse
 	}{
 		{
@@ -67,6 +69,14 @@ func TestRouterDefaultHandlers(t *testing.T) {
 			method:         http.MethodHead,
 			path:           "/",
 			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:   "options handler",
+			method: http.MethodOptions,
+			path:   "/",
+			expectedHeaders: http.Header{
+				"Allow": []string{"GET, OPTIONS"},
+			},
 		},
 		{
 			name:           "error handler",
@@ -93,36 +103,42 @@ func TestRouterDefaultHandlers(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			httpResp := doRequest(test.method, test.path)
-			if test.expectedStatus != httpResp.Code {
-				t.Errorf("expected status code %d, got %d", http.StatusNotFound, httpResp.Code)
-			}
-
-			if test.expectedResponse == nil {
-				body, err := io.ReadAll(httpResp.Body)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if len(body) != 0 {
-					t.Error("expected no body")
-				}
-
-				return
-			}
-
-			var errorResp httprouter.ErrorResponse
-			if err := json.NewDecoder(httpResp.Body).Decode(&errorResp); err != nil {
-				t.Error(err)
-				return
-			}
-
-			if diff := cmp.Diff(test.expectedResponse, &errorResp); diff != "" {
-				t.Error("expected response", diff)
-			}
+			expectErrorResponse(t, httpResp, test.expectedStatus, test.expectedHeaders, test.expectedResponse)
 		})
 	}
 }
 
-func TestRouterOptionsHandler(t *testing.T) {
+func expectErrorResponse(t testing.TB, httpResp *http.Response, status int, headers http.Header, resp *httprouter.ErrorResponse) {
+	if status != 0 && status != httpResp.StatusCode {
+		t.Errorf("expected status code %d, got %d", http.StatusNotFound, httpResp.StatusCode)
+	}
 
+	for k, vs := range headers {
+		if diff := cmp.Diff(vs, httpResp.Header[k]); diff != "" {
+			t.Errorf("expected header %q %s", k, diff)
+		}
+	}
+
+	if resp == nil {
+		body, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(body) != 0 {
+			t.Error("expected no body")
+		}
+
+		return
+	}
+
+	var errorResp httprouter.ErrorResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&errorResp); err != nil {
+		t.Error(err)
+		return
+	}
+
+	if diff := cmp.Diff(resp, &errorResp); diff != "" {
+		t.Error("expected response", diff)
+	}
 }

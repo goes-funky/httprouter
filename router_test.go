@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/goes-funky/httprouter"
 	"github.com/goes-funky/zapdriver"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestRouterDefaultHandlers(t *testing.T) {
@@ -46,65 +48,81 @@ func TestRouterDefaultHandlers(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		method          string
-		path            string
-		expectedStatus  int
-		expectedMessage string
-		expectedDebug   string
+		name             string
+		method, path     string
+		expectedStatus   int
+		expectedResponse *httprouter.ErrorResponse
 	}{
 		{
-			name:            "not found handler",
-			method:          http.MethodGet,
-			path:            "/unknown-path",
-			expectedStatus:  http.StatusNotFound,
-			expectedMessage: http.StatusText(http.StatusNotFound),
+			name:           "not found handler",
+			method:         http.MethodGet,
+			path:           "/unknown-path",
+			expectedStatus: http.StatusNotFound,
+			expectedResponse: &httprouter.ErrorResponse{
+				Message: http.StatusText(http.StatusNotFound),
+			},
 		},
 		{
-			name:            "invalid method handler",
-			method:          http.MethodHead,
-			path:            "/",
-			expectedStatus:  http.StatusMethodNotAllowed,
-			expectedMessage: http.StatusText(http.StatusMethodNotAllowed),
+			name:           "invalid method handler",
+			method:         http.MethodHead,
+			path:           "/",
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
-			name:            "error handler",
-			method:          http.MethodGet,
-			path:            "/error",
-			expectedStatus:  http.StatusForbidden,
-			expectedMessage: "forbidden",
-			expectedDebug:   "forbidden cause",
+			name:           "error handler",
+			method:         http.MethodGet,
+			path:           "/error",
+			expectedStatus: http.StatusForbidden,
+			expectedResponse: &httprouter.ErrorResponse{
+				Message: "forbidden",
+				Debug:   "forbidden cause",
+			},
 		},
 		{
-			name:            "panic handler",
-			method:          http.MethodGet,
-			path:            "/panic",
-			expectedStatus:  http.StatusInternalServerError,
-			expectedMessage: http.StatusText(http.StatusInternalServerError),
+			name:           "panic handler",
+			method:         http.MethodGet,
+			path:           "/panic",
+			expectedStatus: http.StatusInternalServerError,
+			expectedResponse: &httprouter.ErrorResponse{
+				Message: http.StatusText(http.StatusInternalServerError),
+			},
 		},
 	}
 
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			res := doRequest(test.method, test.path)
-			if test.expectedStatus != res.Code {
-				t.Errorf("expected status code %d, got %d", http.StatusNotFound, res.Code)
+			httpResp := doRequest(test.method, test.path)
+			if test.expectedStatus != httpResp.Code {
+				t.Errorf("expected status code %d, got %d", http.StatusNotFound, httpResp.Code)
+			}
+
+			if test.expectedResponse == nil {
+				body, err := io.ReadAll(httpResp.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if len(body) != 0 {
+					t.Error("expected no body")
+				}
+
+				return
 			}
 
 			var errorResp httprouter.ErrorResponse
-			if err := json.NewDecoder(res.Body).Decode(&errorResp); err != nil {
+			if err := json.NewDecoder(httpResp.Body).Decode(&errorResp); err != nil {
 				t.Error(err)
 				return
 			}
 
-			if test.expectedMessage != errorResp.Message {
-				t.Errorf("expected message %q, got %q", test.expectedMessage, errorResp.Message)
-			}
-
-			if test.expectedDebug != errorResp.Debug {
-				t.Errorf("expected debug %q, got %q", test.expectedDebug, errorResp.Debug)
+			if diff := cmp.Diff(test.expectedResponse, &errorResp); diff != "" {
+				t.Error("expected response", diff)
 			}
 		})
 	}
+}
+
+func TestRouterOptionsHandler(t *testing.T) {
+
 }

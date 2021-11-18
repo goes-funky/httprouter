@@ -31,6 +31,12 @@ func DefaultErrorHandler(logger *zap.Logger, verbose bool) ErrorHandlerFunc {
 			logger.Info("http error", fields...)
 		}
 
+		// do not write JSON response on http methods that do not return body
+		if req.Method == http.MethodHead || req.Method == http.MethodPut || req.Method == http.MethodTrace {
+			w.WriteHeader(httpErr.Status)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(httpErr.Status)
 

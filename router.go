@@ -3,7 +3,6 @@ package httprouter
 import (
 	"net/http"
 
-	"github.com/goes-funky/zapdriver"
 	"github.com/julienschmidt/httprouter"
 	"go.uber.org/zap"
 )
@@ -31,18 +30,23 @@ func New(logger *zap.Logger, opts ...Opt) *Router {
 		opt(&config)
 	}
 
+	logger = logger.Named("httprouter")
+
 	errorHandler := config.errorHandler(logger, config.verbose)
 
 	delegate := httprouter.New()
-	delegate.HandleMethodNotAllowed = true
 	delegate.NotFound = adaptHandler(logger, &config, errorHandler, func(http.ResponseWriter, *http.Request) error {
 		return NewError(http.StatusNotFound)
 	})
+
+	delegate.HandleMethodNotAllowed = true
 	delegate.MethodNotAllowed = adaptHandler(logger, &config, errorHandler, func(http.ResponseWriter, *http.Request) error {
 		return NewError(http.StatusMethodNotAllowed)
 	})
+
 	delegate.PanicHandler = config.panicHandler(logger, config.verbose)
 
+	delegate.HandleOPTIONS = config.handleOptions
 	if config.globalOptions != nil {
 		delegate.HandleOPTIONS = true
 		delegate.GlobalOPTIONS = adaptHandler(logger, &config, errorHandler, config.globalOptions)
@@ -87,13 +91,8 @@ func adaptHandler(logger *zap.Logger, config *config, errorHandler ErrorHandlerF
 			errorHandler(rw, req, err)
 		}
 
-		if config.logHTTP {
-			payload := zapdriver.NewHTTP(req)
-			payload.Status = rw.StatusCode()
-			payload.ResponseSize = rw.Size()
-			payload.Latency = rw.Latency()
-
-			logger.WithOptions(zap.WithCaller(false)).Info("http request", zapdriver.HTTP(payload))
+		if config.logRoundtrip != nil {
+			config.logRoundtrip(logger, rw, req)
 		}
 	})
 }

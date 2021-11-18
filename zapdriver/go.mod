@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/goes-funky/httprouter v0.0.0-20211118180036-82957f41fe1a
-	github.com/goes-funky/zapdriver v0.0.0-20211118165755-ca718bf849a6
+	github.com/goes-funky/zapdriver v1.0.0
 	go.uber.org/zap v1.19.1
 )
 

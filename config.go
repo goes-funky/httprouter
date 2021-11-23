@@ -2,30 +2,25 @@ package httprouter
 
 import (
 	"net/http"
-
-	"go.uber.org/zap"
 )
 
 type Opt func(c *config)
 
-type LogRoundtrip func(logger *zap.Logger, rw *ResponseWriter, req *http.Request)
+type LogRoundtrip func(rw ResponseWriter, req *http.Request)
 
-type ErrorHandler func(logger *zap.Logger, verbose bool) ErrorHandlerFunc
-
-type PanicHandler func(logger *zap.Logger, verbose bool) PanicHandlerFunc
-
-func DefaultLogRoundtrip(logger *zap.Logger, rw *ResponseWriter, req *http.Request) {
-	logger.Info("roundtrip",
-		zap.String("method", req.Method),
-		zap.String("path", req.URL.Path),
-		zap.Int("status", rw.StatusCode()),
-		zap.Duration("elapsed", rw.Latency()),
-	)
+func NoopHandler(http.ResponseWriter, *http.Request) error {
+	return nil
 }
 
 func WithVerbose(verbose bool) Opt {
 	return func(c *config) {
 		c.verbose = verbose
+	}
+}
+
+func WithRedirectTrailingSlash(redirectTrailingSlash bool) Opt {
+	return func(c *config) {
+		c.redirectTrailingSlash = redirectTrailingSlash
 	}
 }
 
@@ -42,6 +37,10 @@ func WithHandleOptions(handleOptions bool) Opt {
 }
 
 func WithErrorHandler(handler ErrorHandler) Opt {
+	if handler == nil {
+		panic("ErrorHandler cannot be nil")
+	}
+
 	return func(c *config) {
 		c.errorHandler = handler
 	}
@@ -53,31 +52,33 @@ func WithPanicHandler(handler PanicHandler) Opt {
 	}
 }
 
+func WithOptionsHandler(handler HandlerFunc) Opt {
+	return func(c *config) {
+		c.optionsHandler = handler
+	}
+}
+
 func WithMiddleware(middleware ...Middleware) Opt {
 	return func(c *config) {
 		c.middleware = append(c.middleware, middleware...)
 	}
 }
 
-func WithGlobalOptions(handler HandlerFunc) Opt {
-	return func(c *config) {
-		c.globalOptions = handler
-	}
-}
-
 type config struct {
-	verbose       bool
-	handleOptions bool
-	logRoundtrip  LogRoundtrip
-	errorHandler  ErrorHandler
-	panicHandler  PanicHandler
-	middleware    []Middleware
-	globalOptions HandlerFunc
+	verbose               bool
+	handleOptions         bool
+	redirectTrailingSlash bool
+	logRoundtrip          LogRoundtrip
+	errorHandler          ErrorHandler
+	panicHandler          PanicHandler
+	optionsHandler        HandlerFunc
+	middleware            []Middleware
 }
 
 var defaultConfig = config{
-	handleOptions: true,
-	logRoundtrip:  DefaultLogRoundtrip,
-	errorHandler:  DefaultErrorHandler,
-	panicHandler:  DefaultPanicHandler,
+	handleOptions:         true,
+	redirectTrailingSlash: true,
+	errorHandler:          DefaultErrorHandler,
+	panicHandler:          DefaultPanicHandler,
+	optionsHandler:        NoopHandler,
 }

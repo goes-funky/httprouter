@@ -5,27 +5,60 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"go.uber.org/zap"
 
 	"github.com/goes-funky/httprouter"
 )
 
-func TestRouterDefaultHandlers(t *testing.T) {
-	logger, err := zap.NewDevelopmentConfig().Build()
+type response struct {
+	Message string `json:"message"`
+}
+
+func ExampleRouter() {
+	router := httprouter.New()
+	router.Handler(http.MethodGet, "/greet/:name", func(w http.ResponseWriter, req *http.Request) error {
+		params := httprouter.GetParams(req.Context())
+
+		response := response{Message: fmt.Sprintf("Hello %s!", params["name"])}
+		return httprouter.JSONResponse(w, http.StatusOK, response)
+	})
+
+	server := httptest.NewServer(router)
+
+	client := server.Client()
+
+	httpResp, err := client.Get(server.URL + "/greet/fry")
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal("failed to GET /greet/fry", err)
 	}
 
-	router := httprouter.New(logger, httprouter.WithVerbose(true))
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		log.Fatal("failed to read http response body", err)
+	}
+
+	var resp response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		log.Fatal("failed to unmarshal http response body", err)
+	}
+
+	if resp.Message != "Hello fry!" {
+		log.Fatal("unexpected response")
+	}
+}
+
+func TestRouterDefaultHandlers(t *testing.T) {
+	router := httprouter.New(httprouter.WithVerbose(true))
 
 	router.Handler(http.MethodGet, "/", func(w http.ResponseWriter, req *http.Request) error {
-		fmt.Fprint(w, "Hello World!")
-		return nil
+		return httprouter.JSONResponse(w, http.StatusOK, response{
+			Message: "Hello World!",
+		})
 	})
 
 	router.Handler(http.MethodGet, "/error", func(w http.ResponseWriter, req *http.Request) error {
@@ -40,12 +73,20 @@ func TestRouterDefaultHandlers(t *testing.T) {
 		panic("panic handler")
 	})
 
-	doRequest := func(method string, path string) *http.Response {
-		req := httptest.NewRequest(method, "http://example.com"+path, nil)
-		rw := httptest.NewRecorder()
-		router.ServeHTTP(rw, req)
+	server := httptest.NewServer(router)
 
-		return rw.Result()
+	doRequest := func(t testing.TB, method, path string) *http.Response {
+		req, err := http.NewRequest(method, server.URL+path, nil)
+		if err != nil {
+			t.Fatal("http request", err)
+		}
+
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal("http request", err)
+		}
+
+		return resp
 	}
 
 	tests := []struct {
@@ -102,7 +143,7 @@ func TestRouterDefaultHandlers(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			httpResp := doRequest(test.method, test.path)
+			httpResp := doRequest(t, test.method, test.path)
 			expectErrorResponse(t, httpResp, test.expectedStatus, test.expectedHeaders, test.expectedResponse)
 		})
 	}

@@ -22,7 +22,6 @@ func TestLogRoundtrip(t *testing.T) {
 	logger, err := config.Build(zap.WrapCore(func(original zapcore.Core) zapcore.Core {
 		return zapcore.NewTee(original, core)
 	}))
-
 	if err != nil {
 		t.Fatal(err)
 	}

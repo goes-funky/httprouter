@@ -311,7 +311,6 @@ func TestRouteData(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 type routeDataObserver struct {

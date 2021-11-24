@@ -9,8 +9,10 @@ import (
 	"github.com/goes-funky/zapdriver"
 )
 
-var NewDevelopmentConfig = zapdriver.NewDevelopmentConfig
-var NewProductionConfig = zapdriver.NewProductionConfig
+var (
+	NewDevelopmentConfig = zapdriver.NewDevelopmentConfig
+	NewProductionConfig  = zapdriver.NewProductionConfig
+)
 
 func LogRoundtrip(logger *zap.Logger) httprouter.LogRoundtrip {
 	return func(rw httprouter.ResponseWriter, req *http.Request) {

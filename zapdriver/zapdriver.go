@@ -3,26 +3,14 @@ package zapdriver
 import (
 	"net/http"
 
+	"go.uber.org/zap"
+
 	"github.com/goes-funky/httprouter"
 	"github.com/goes-funky/zapdriver"
-
-	"go.uber.org/zap"
 )
 
-func NewConfig(verbose bool) zap.Config {
-	if verbose {
-		return zapdriver.NewDevelopmentConfig()
-	}
-
-	return zapdriver.NewProductionConfig()
-}
-
-func RouterOpts(logger *zap.Logger, verbose bool) []httprouter.Opt {
-	return []httprouter.Opt{
-		httprouter.WithLogRoundtrip(LogRoundtrip(logger)),
-		httprouter.WithVerbose(verbose),
-	}
-}
+var NewDevelopmentConfig = zapdriver.NewDevelopmentConfig
+var NewProductionConfig = zapdriver.NewProductionConfig
 
 func LogRoundtrip(logger *zap.Logger) httprouter.LogRoundtrip {
 	return func(rw httprouter.ResponseWriter, req *http.Request) {

@@ -6,29 +6,29 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/goes-funky/httprouter"
-	"github.com/goes-funky/httprouter/zapdriver"
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/goes-funky/httprouter"
+	"github.com/goes-funky/httprouter/zapdriver"
 )
 
 func TestLogRoundtrip(t *testing.T) {
-	verbose := true
-	config := zapdriver.NewConfig(verbose)
+	config := zapdriver.NewDevelopmentConfig()
 
 	core, logs := observer.New(zap.DebugLevel)
-
-	logger, err := config.Build(zap.WrapCore(func(zapcore.Core) zapcore.Core {
-		return core
+	logger, err := config.Build(zap.WrapCore(func(original zapcore.Core) zapcore.Core {
+		return zapcore.NewTee(original, core)
 	}))
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	router := httprouter.New(zapdriver.RouterOpts(logger, verbose)...)
+	router := httprouter.New(httprouter.WithLogRoundtrip(zapdriver.LogRoundtrip(logger)))
+
 	router.Handler(http.MethodGet, "/hello", func(w http.ResponseWriter, req *http.Request) error {
 		fmt.Fprint(w, "Hello World!")
 		return nil

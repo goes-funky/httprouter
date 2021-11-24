@@ -29,12 +29,17 @@ func TestLogRoundtrip(t *testing.T) {
 	}
 
 	router := httprouter.New(zapdriver.RouterOpts(logger, verbose)...)
-	router.Handler(http.MethodGet, "/", func(w http.ResponseWriter, req *http.Request) error {
+	router.Handler(http.MethodGet, "/hello", func(w http.ResponseWriter, req *http.Request) error {
 		fmt.Fprint(w, "Hello World!")
 		return nil
 	})
 
 	server := httptest.NewServer(router)
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 
 	tests := []struct {
 		name           string
@@ -45,14 +50,20 @@ func TestLogRoundtrip(t *testing.T) {
 		{
 			name:           "get exisiting",
 			method:         http.MethodGet,
-			path:           "/",
-			expectedStatus: 200,
+			path:           "/hello",
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "redirect",
+			method:         http.MethodGet,
+			path:           "/hello/",
+			expectedStatus: http.StatusPermanentRedirect,
 		},
 		{
 			name:           "not found",
 			method:         http.MethodGet,
 			path:           "/unknown",
-			expectedStatus: 404,
+			expectedStatus: http.StatusNotFound,
 		},
 	}
 
@@ -65,7 +76,7 @@ func TestLogRoundtrip(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			resp, err := server.Client().Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -61,15 +61,7 @@ func (r *Router) Handler(method, path string, handler HandlerFunc, middleware ..
 		}
 	}
 
-	addSlash := false
-	if len(path) > 1 && path[len(path)-1] == '/' && r.config.redirectTrailingSlash {
-		addSlash = true
-		path = path[:len(path)-1]
-	}
-
-	node := r.root.addPath(path[1:], nil, false)
-	node.addSlash = addSlash
-	node.setHandler(method, handler, false)
+	r.root.registerPath(method, path, handler, r.config.redirectTrailingSlash)
 }
 
 // HTTPHandler register http.Handler at given method and path
@@ -102,6 +94,7 @@ func (r *Router) Lookup(rw http.ResponseWriter, req *http.Request) LookupResult 
 			Status: http.StatusNotFound,
 		}
 	}
+
 	var paramsMap map[string]string
 	if len(params) != 0 {
 		if len(params) != len(n.leafWildcardNames) {
@@ -111,13 +104,19 @@ func (r *Router) Lookup(rw http.ResponseWriter, req *http.Request) LookupResult 
 
 		paramsMap = make(map[string]string)
 		numParams := len(params)
+
 		for index := 0; index < numParams; index++ {
-			paramsMap[n.leafWildcardNames[numParams-index-1]] = params[index]
+			name := n.leafWildcardNames[numParams-index-1]
+			if len(name) == 0 {
+				name = "*"
+			}
+
+			paramsMap[name] = params[index]
 		}
 	}
 
 	routeData := RouteData{
-		Route:  path,
+		Route:  n.route,
 		Params: paramsMap,
 	}
 
@@ -130,8 +129,6 @@ func (r *Router) Lookup(rw http.ResponseWriter, req *http.Request) LookupResult 
 		if _, ok := n.leafHandler[http.MethodOptions]; !ok && r.config.handleOptions {
 			methods = append(methods, "OPTIONS")
 		}
-
-		rw.Header().Set("Allow", strings.Join(methods, ", "))
 
 		if req.Method == "OPTIONS" && r.config.optionsHandler != nil {
 			return LookupResult{
@@ -201,8 +198,16 @@ func (r *Router) ServeLookupResult(rw http.ResponseWriter, req *http.Request, lr
 		return
 	}
 
+	if len(lr.Methods) != 0 {
+		w.Header().Set("Allow", strings.Join(lr.Methods, ", "))
+	}
+
 	err := lr.Handler(w, req)
 	if err != nil {
 		r.config.errorHandler(w, req, r.config.verbose, err)
 	}
+}
+
+func (r *Router) DumpTree() string {
+	return r.root.dumpTree("", "")
 }

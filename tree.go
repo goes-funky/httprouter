@@ -7,7 +7,8 @@ import (
 )
 
 type node struct {
-	path string
+	path  string
+	route string
 
 	priority int
 
@@ -55,6 +56,19 @@ func (n *node) setHandler(verb string, handler HandlerFunc, implicitHead bool) {
 	if verb == "HEAD" {
 		n.implicitHead = implicitHead
 	}
+}
+
+func (n *node) registerPath(method, path string, handler HandlerFunc, redirectTrailingSlash bool) {
+	addSlash := false
+	if len(path) > 1 && path[len(path)-1] == '/' && redirectTrailingSlash {
+		addSlash = true
+		path = path[:len(path)-1]
+	}
+
+	node := n.addPath(path[1:], nil, false)
+	node.route = path
+	node.addSlash = addSlash
+	node.setHandler(method, handler, false)
 }
 
 func (n *node) addPath(path string, wildcards []string, inStaticToken bool) *node {

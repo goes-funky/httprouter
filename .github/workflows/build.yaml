@@ -6,3 +6,5 @@ on:
 jobs:
   build-go:
     uses: goes-funky/workflows/.github/workflows/build-go.yaml@master
+    with:
+      go-version: "1.17.2"

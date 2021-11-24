@@ -1,76 +1,71 @@
 package httprouter
 
 import (
+	"fmt"
 	"net/http"
-
-	"github.com/julienschmidt/httprouter"
-	"go.uber.org/zap"
+	"strings"
 )
-
-var ParamsFromContext = httprouter.ParamsFromContext
 
 type HandlerFunc func(w http.ResponseWriter, req *http.Request) error
 
 type Middleware func(handler HandlerFunc) HandlerFunc
 
-type ErrorHandlerFunc func(w http.ResponseWriter, req *http.Request, err error)
+type ErrorHandler func(w http.ResponseWriter, req *http.Request, verbose bool, err error)
 
-type PanicHandlerFunc func(w http.ResponseWriter, req *http.Request, pv interface{})
+type PanicHandler func(rw http.ResponseWriter, req *http.Request, verbose bool, pv interface{})
 
 type Router struct {
-	logger       *zap.Logger
-	config       config
-	delegate     *httprouter.Router
-	errorHandler ErrorHandlerFunc
+	config config
+	root   *node
 }
 
-func New(logger *zap.Logger, opts ...Opt) *Router {
+// LookupResult contains information about a route lookup, which is returned from Lookup and
+// can be passed to ServeLookupResult if the request should be served.
+type LookupResult struct {
+	RouteData
+	// StatusCode informs the caller about the result of the lookup.
+	// This will generally be `http.StatusNotFound` or `http.StatusMethodNotAllowed` for an
+	// error case. On a normal success, the statusCode will be `http.StatusOK`. A redirect code
+	// will also be used in the case
+	Status  int
+	Handler HandlerFunc
+	Methods []string // Only has a value when StatusCode is MethodNotAllowed.
+}
+
+func New(opts ...Opt) *Router {
 	config := defaultConfig
 	for _, opt := range opts {
 		opt(&config)
 	}
 
-	logger = logger.Named("httprouter")
-
-	errorHandler := config.errorHandler(logger, config.verbose)
-
-	delegate := httprouter.New()
-	delegate.NotFound = adaptHandler(logger, &config, errorHandler, func(http.ResponseWriter, *http.Request) error {
-		return NewError(http.StatusNotFound)
-	})
-
-	delegate.HandleMethodNotAllowed = true
-	delegate.MethodNotAllowed = adaptHandler(logger, &config, errorHandler, func(http.ResponseWriter, *http.Request) error {
-		return NewError(http.StatusMethodNotAllowed)
-	})
-
-	delegate.PanicHandler = config.panicHandler(logger, config.verbose)
-
-	delegate.HandleOPTIONS = config.handleOptions
-	if config.globalOptions != nil {
-		delegate.HandleOPTIONS = true
-		delegate.GlobalOPTIONS = adaptHandler(logger, &config, errorHandler, config.globalOptions)
-	}
-
 	return &Router{
-		logger:       logger,
-		config:       config,
-		delegate:     delegate,
-		errorHandler: errorHandler,
+		root:   &node{path: "/"},
+		config: config,
 	}
 }
 
+// Handler registers HandlerFunc at given method and path
 func (r *Router) Handler(method, path string, handler HandlerFunc, middleware ...Middleware) {
+	switch {
+	case len(path) == 0:
+		panic("Path must be non empty")
+	case len(path) > 0 && path[0] != '/':
+		panic(fmt.Sprintf("Path %q must start with slash", path))
+	}
+
 	middleware = append(r.config.middleware, middleware...)
 
-	for _, mw := range middleware {
-		handler = mw(handler)
+	if len(middleware) > 0 {
+		for i := len(middleware) - 1; i != 0; i-- {
+			handler = middleware[i](handler)
+		}
 	}
 
-	r.delegate.HandlerFunc(method, path, adaptHandler(r.logger, &r.config, r.errorHandler, handler))
+	r.root.registerPath(method, path, handler, r.config.redirectTrailingSlash)
 }
 
-func (r *Router) RawHandler(method, path string, handler http.Handler, middleware ...Middleware) {
+// HTTPHandler register http.Handler at given method and path
+func (r *Router) HTTPHandler(method, path string, handler http.Handler, middleware ...Middleware) {
 	h := func(rw http.ResponseWriter, r *http.Request) error {
 		handler.ServeHTTP(rw, r)
 		return nil
@@ -79,20 +74,140 @@ func (r *Router) RawHandler(method, path string, handler http.Handler, middlewar
 	r.Handler(method, path, h, middleware...)
 }
 
-func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.delegate.ServeHTTP(w, req)
+// ServeHTTP implements http.Handler
+func (r *Router) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	lr := r.Lookup(rw, req)
+	r.ServeLookupResult(rw, req, lr)
 }
 
-func adaptHandler(logger *zap.Logger, config *config, errorHandler ErrorHandlerFunc, handler HandlerFunc) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		rw := NewResponseWriter(w)
-		err := handler(rw, req)
-		if err != nil {
-			errorHandler(rw, req, err)
+func (r *Router) Lookup(rw http.ResponseWriter, req *http.Request) LookupResult {
+	path := req.URL.Path
+
+	trailingSlash := strings.HasSuffix(path, "/") && len(path) > 1
+	if trailingSlash && r.config.redirectTrailingSlash {
+		path = path[:len(path)-1]
+	}
+
+	n, handler, params := r.root.search(req.Method, path[1:])
+	if n == nil {
+		return LookupResult{
+			Status: http.StatusNotFound,
+		}
+	}
+
+	var paramsMap map[string]string
+	if len(params) != 0 {
+		if len(params) != len(n.leafWildcardNames) {
+			panic(fmt.Sprintf("httprouter parameter list length mismatch: %v, %v",
+				params, n.leafWildcardNames))
 		}
 
-		if config.logRoundtrip != nil {
-			config.logRoundtrip(logger, rw, req)
+		paramsMap = make(map[string]string)
+		numParams := len(params)
+
+		for index := 0; index < numParams; index++ {
+			name := n.leafWildcardNames[numParams-index-1]
+			if len(name) == 0 {
+				name = "*"
+			}
+
+			paramsMap[name] = params[index]
 		}
-	})
+	}
+
+	routeData := RouteData{
+		Route:  n.route,
+		Params: paramsMap,
+	}
+
+	if handler == nil {
+		var methods []string
+		for method := range n.leafHandler {
+			methods = append(methods, method)
+		}
+
+		if _, ok := n.leafHandler[http.MethodOptions]; !ok && r.config.handleOptions {
+			methods = append(methods, "OPTIONS")
+		}
+
+		if req.Method == "OPTIONS" && r.config.optionsHandler != nil {
+			return LookupResult{
+				Status:    http.StatusOK,
+				RouteData: routeData,
+				Handler:   r.config.optionsHandler,
+				Methods:   methods,
+			}
+		}
+
+		return LookupResult{
+			Status:    http.StatusMethodNotAllowed,
+			RouteData: routeData,
+			Methods:   methods,
+		}
+	}
+
+	if !n.isCatchAll && trailingSlash != n.addSlash && r.config.redirectTrailingSlash {
+		var status int
+		switch {
+		case req.Method != http.MethodGet:
+			status = http.StatusTemporaryRedirect
+		default:
+			status = http.StatusPermanentRedirect
+		}
+
+		if n.addSlash {
+			path += "/"
+		}
+
+		return LookupResult{
+			Status: status,
+			Handler: func(rw http.ResponseWriter, req *http.Request) error {
+				http.Redirect(rw, req, path, status)
+				return nil
+			},
+			RouteData: routeData,
+		}
+	}
+
+	return LookupResult{
+		Status:    http.StatusOK,
+		Handler:   handler,
+		RouteData: routeData,
+	}
+}
+
+func (r *Router) ServeLookupResult(rw http.ResponseWriter, req *http.Request, lr LookupResult) {
+	w := NewResponseWriter(rw)
+	ctx := WithRouteData(req.Context(), lr.RouteData)
+	req = req.WithContext(ctx)
+
+	if r.config.panicHandler != nil {
+		defer func() {
+			if pv := recover(); pv != nil {
+				r.config.panicHandler(w, req, r.config.verbose, pv)
+			}
+		}()
+	}
+
+	if r.config.logRoundtrip != nil {
+		defer r.config.logRoundtrip(w, req)
+	}
+
+	if lr.Handler == nil {
+		r.config.errorHandler(w, req, r.config.verbose, NewError(lr.Status))
+		return
+	}
+
+	if len(lr.Methods) != 0 {
+		w.Header().Set("Allow", strings.Join(lr.Methods, ", "))
+	}
+
+	err := lr.Handler(w, req)
+	if err != nil {
+		r.config.errorHandler(w, req, r.config.verbose, err)
+	}
+}
+
+func (r *Router) DumpTree() string {
+	return r.root.dumpTree("", "")
 }

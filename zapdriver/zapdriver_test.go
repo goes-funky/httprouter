@@ -26,7 +26,7 @@ func TestLogRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := httprouter.New(httprouter.WithLogRoundtrip(zapdriver.LogRoundtrip(logger)))
+	router := httprouter.New(zapdriver.RouterOpts(logger)...)
 
 	router.Handler(http.MethodGet, "/hello", func(w http.ResponseWriter, req *http.Request) error {
 		fmt.Fprint(w, "Hello World!")

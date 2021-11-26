@@ -10,7 +10,7 @@ type HandlerFunc func(w http.ResponseWriter, req *http.Request) error
 
 type Middleware func(handler HandlerFunc) HandlerFunc
 
-type ErrorHandler func(w http.ResponseWriter, req *http.Request, verbose bool, err error)
+type ErrorHandler func(w http.ResponseWriter, req *http.Request, verbose bool, err Error)
 
 type PanicHandler func(rw http.ResponseWriter, req *http.Request, verbose bool, pv interface{})
 
@@ -194,7 +194,7 @@ func (r *Router) ServeLookupResult(rw http.ResponseWriter, req *http.Request, lr
 	}
 
 	if lr.Handler == nil {
-		r.config.errorHandler(w, req, r.config.verbose, NewError(lr.Status))
+		r.config.errorHandler(w, req, r.config.verbose, NewError(lr.Status, Operational()))
 		return
 	}
 
@@ -204,7 +204,7 @@ func (r *Router) ServeLookupResult(rw http.ResponseWriter, req *http.Request, lr
 
 	err := lr.Handler(w, req)
 	if err != nil {
-		r.config.errorHandler(w, req, r.config.verbose, err)
+		r.config.errorHandler(w, req, r.config.verbose, AsError(err))
 	}
 }
 

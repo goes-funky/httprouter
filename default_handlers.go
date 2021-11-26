@@ -3,7 +3,6 @@ package httprouter
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 )
 
 type ErrorResponse struct {
@@ -11,26 +10,23 @@ type ErrorResponse struct {
 	Debug   string `json:"debug,omitempty"`
 }
 
-func DefaultErrorHandler(w http.ResponseWriter, req *http.Request, verbose bool, err error) {
-	httpErr := AsError(err)
-	cause := httpErr.Cause
-
+func DefaultErrorHandler(w http.ResponseWriter, req *http.Request, verbose bool, err Error) {
 	// do not write JSON response on http methods that do not return body
 	if req.Method == http.MethodHead || req.Method == http.MethodPut || req.Method == http.MethodTrace {
-		w.WriteHeader(httpErr.Status)
+		w.WriteHeader(err.Status)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpErr.Status)
+	w.WriteHeader(err.Status)
 
 	var debug string
-	if verbose && cause != nil {
-		debug = cause.Error()
+	if verbose && err.Cause != nil {
+		debug = err.Cause.Error()
 	}
 
 	resp := ErrorResponse{
-		Message: httpErr.Message,
+		Message: err.Message,
 		Debug:   debug,
 	}
 
@@ -46,9 +42,4 @@ func DefaultPanicHandler(w http.ResponseWriter, req *http.Request, verbose bool,
 	}
 
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-func DefaultMethodNotAllowed(rw http.ResponseWriter, req *http.Request, verbose bool, methods []string) {
-	rw.Header().Set("Allow", strings.Join(methods, ", "))
-	DefaultErrorHandler(rw, req, verbose, NewError(http.StatusMethodNotAllowed))
 }
